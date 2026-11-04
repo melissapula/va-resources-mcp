@@ -1,0 +1,35 @@
+[project]
+name = "va-resources-mcp"
+version = "0.1.0"
+description = "MCP server that helps AI agents find VA facilities and forms using public federal data"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=2.3,<3",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+va-resources-mcp = "va_resources_mcp.server:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.17.3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/va_resources_mcp"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
