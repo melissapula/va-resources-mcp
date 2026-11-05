@@ -2,7 +2,7 @@
 
 An [MCP](https://modelcontextprotocol.io) server that lets AI agents help veterans find VA facilities and forms using public federal data.
 
-![Demo: geocoding a Bemidji, MN address in the MCP Inspector, then finding the nearest VA clinic with mental health care](docs/demo.gif)
+![Demo: geocoding a Bemidji, MN address in the MCP Inspector, then listing the five closest VA health facilities with mental health care, nearest first](docs/demo.gif)
 
 ## Tools
 
@@ -40,10 +40,10 @@ npx @modelcontextprotocol/inspector uv run va-resources-mcp
 
 ## Connect it to Claude Code
 
-From this folder:
+Replace `<path-to-repo>` with the full path to your clone of this repository:
 
 ```
-claude mcp add va-resources -- uv --directory C:\Users\missa\repositories\va-resources-mcp run va-resources-mcp
+claude mcp add va-resources -- uv --directory <path-to-repo> run va-resources-mcp
 ```
 
 Then ask Claude: "Geocode 403 4th St NW, Bemidji, MN 56601."
