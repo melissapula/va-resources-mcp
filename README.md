@@ -2,6 +2,8 @@
 
 An [MCP](https://modelcontextprotocol.io) server that lets AI agents help veterans find VA facilities and forms using public federal data.
 
+![Demo: geocoding a Bemidji, MN address in the MCP Inspector, then finding the nearest VA clinic with mental health care](docs/demo.gif)
+
 ## Tools
 
 | Tool | What it does | Data source |
