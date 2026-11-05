@@ -158,6 +158,16 @@ async def test_invalid_service_400_passes_api_detail_through():
         await search(client_returning(400, body), service="notAService")
 
 
+@pytest.mark.parametrize(
+    "client_kwargs",
+    [{"body": {"message": "Bad Request"}}, {"body": {"errors": []}}, {"text": "not json"}],
+    ids=["no-errors-key", "empty-errors", "not-json"],
+)
+async def test_400_without_api_detail_raises_generic_bad_request(client_kwargs):
+    with pytest.raises(FacilitiesError, match="rejected the request as a bad request"):
+        await search(client_returning(400, **client_kwargs))
+
+
 @pytest.mark.parametrize("status", [401, 403])
 async def test_rejected_key_raises_error_that_does_not_contain_the_key(status):
     with pytest.raises(FacilitiesError, match="VA_API_KEY") as excinfo:
@@ -211,6 +221,76 @@ async def test_skips_a_malformed_facility_logs_it_and_returns_the_rest(caplog):
     (record,) = caplog.records
     assert "vha_bad" in record.getMessage()
     assert API_KEY not in caplog.text
+
+
+def _with_physical(**physical_overrides) -> dict:
+    physical = {"address1": "705 5th Street NW", "city": "Bemidji", "state": "MN"}
+    physical.update(physical_overrides)
+    return {"address": {"physical": physical}}
+
+
+@pytest.mark.parametrize(
+    ("overrides", "field", "expected"),
+    [
+        ({"phone": "218-555-1212"}, "phone", None),
+        ({"phone": {"main": 2187556360}}, "phone", None),
+        ({"classification": 7}, "classification", None),
+        ({"address": "705 5th Street NW"}, "address", None),
+        ({"address": {"physical": ["705 5th Street NW"]}}, "address", None),
+        # A numeric ZIP is dropped rather than str()-ed, because str() would lose leading zeros.
+        (_with_physical(zip=56601), "address", "705 5th Street NW, Bemidji, MN"),
+        (_with_physical(address2=12), "address", "705 5th Street NW, Bemidji, MN"),
+    ],
+    ids=[
+        "phone-string",
+        "phone-main-number",
+        "classification-number",
+        "address-string",
+        "physical-list",
+        "zip-number",
+        "address2-number",
+    ],
+)
+async def test_malformed_optional_field_only_blanks_that_field(overrides, field, expected):
+    body = {"data": [facility("vha_437GE", "Bemidji VA Clinic", **overrides)], "meta": {}}
+
+    (result,) = await search(client_returning(200, body))
+
+    assert getattr(result, field) == expected
+    assert result.name == "Bemidji VA Clinic"
+
+
+@pytest.mark.parametrize(
+    ("record_id", "overrides"),
+    [
+        ("vha_bad", {"name": None}),
+        ("vha_bad", {"name": ""}),
+        ("vha_bad", {"name": 5}),
+        ("vha_bad", {"facilityType": None}),
+        ("vha_bad", {"operatingStatus": {"code": None}}),
+        (5, {}),
+        (None, {}),
+    ],
+    ids=[
+        "name-null",
+        "name-empty",
+        "name-number",
+        "type-null",
+        "status-code-null",
+        "id-number",
+        "id-null",
+    ],
+)
+async def test_skips_a_record_whose_required_field_is_not_a_string(record_id, overrides, caplog):
+    broken = facility(record_id, "Broken Clinic")
+    broken["attributes"].update(overrides)  # not via facility(): "name" would collide with its arg
+    body = {"data": [broken, *BEMIDJI_RESPONSE["data"]], "meta": BEMIDJI_RESPONSE["meta"]}
+
+    with caplog.at_level(logging.WARNING, logger="va_resources_mcp.va_facilities"):
+        results = await search(client_returning(200, body))
+
+    assert [f.id for f in results] == ["vha_437GE", "vha_656GA"]
+    assert len(caplog.records) == 1
 
 
 @pytest.mark.parametrize(

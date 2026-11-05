@@ -168,25 +168,47 @@ def _try_summary(item: dict, distances: dict[str, float]) -> FacilitySummary | N
 
 
 def _to_summary(item: dict, distance: float | None) -> FacilitySummary:
+    """A bad required field raises (so the record is skipped); a bad optional one becomes None."""
     attributes = item["attributes"]
     return FacilitySummary(
-        id=item["id"],
-        name=attributes["name"],
-        facility_type=attributes["facilityType"],
-        classification=attributes.get("classification"),
+        id=_required_str(item["id"], "id"),
+        name=_required_str(attributes["name"], "name"),
+        facility_type=_required_str(attributes["facilityType"], "facilityType"),
+        classification=_optional_str(attributes.get("classification")),
         address=_one_line_address(attributes.get("address")),
-        phone=(attributes.get("phone") or {}).get("main"),
+        phone=_optional_str(_dict_or_empty(attributes.get("phone")).get("main")),
         distance_miles=distance,
-        operating_status=attributes["operatingStatus"]["code"],
+        operating_status=_required_str(attributes["operatingStatus"]["code"], "operatingStatus"),
     )
 
 
-def _one_line_address(address: dict | None) -> str | None:
-    """Join the physical address parts that exist, e.g. "705 5th St NW, Bemidji, MN 56601"."""
-    physical = (address or {}).get("physical") or {}
-    street = ", ".join(
-        part for part in (physical.get(k) for k in ("address1", "address2", "address3")) if part
-    )
-    state_zip = " ".join(part for part in (physical.get("state"), physical.get("zip")) if part)
-    parts = [part for part in (street, physical.get("city"), state_zip) if part]
+def _required_str(value: object, field: str) -> str:
+    # The message names the field only, never the value, so the log line stays small and safe.
+    if not isinstance(value, str) or not value:
+        raise TypeError(f"{field} is not a non-empty string")
+    return value
+
+
+def _optional_str(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def _dict_or_empty(value: object) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def _one_line_address(address: object) -> str | None:
+    """Join the physical address parts that exist, e.g. "705 5th St NW, Bemidji, MN 56601".
+
+    A part that isn't a string is left out rather than converted, since str() of a numeric ZIP
+    would drop its leading zeros.
+    """
+    physical = _dict_or_empty(_dict_or_empty(address).get("physical"))
+
+    def part(key: str) -> str | None:
+        return _optional_str(physical.get(key))
+
+    street = ", ".join(p for p in (part("address1"), part("address2"), part("address3")) if p)
+    state_zip = " ".join(p for p in (part("state"), part("zip")) if p)
+    parts = [p for p in (street, part("city"), state_zip) if p]
     return ", ".join(parts) or None
