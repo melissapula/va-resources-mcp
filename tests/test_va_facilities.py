@@ -1,5 +1,6 @@
 """Unit tests for the VA Facilities client, using a fake transport instead of the network."""
 
+import logging
 from contextlib import suppress
 
 import httpx
@@ -198,26 +199,60 @@ async def test_malformed_body_raises_facilities_error(client_kwargs):
         await search(client_returning(200, **client_kwargs))
 
 
-async def test_skips_a_malformed_facility_and_returns_the_rest():
+async def test_skips_a_malformed_facility_logs_it_and_returns_the_rest(caplog):
     broken = facility("vha_bad", "Broken Clinic")
     del broken["attributes"]["operatingStatus"]
     body = {"data": [broken, *BEMIDJI_RESPONSE["data"]], "meta": BEMIDJI_RESPONSE["meta"]}
 
-    results = await search(client_returning(200, body))
+    with caplog.at_level(logging.WARNING, logger="va_resources_mcp.va_facilities"):
+        results = await search(client_returning(200, body))
 
     assert [f.id for f in results] == ["vha_437GE", "vha_656GA"]
+    (record,) = caplog.records
+    assert "vha_bad" in record.getMessage()
+    assert API_KEY not in caplog.text
 
 
-async def test_non_ascii_api_key_raises_error_pointing_at_the_key_without_sending():
+@pytest.mark.parametrize(
+    "bad_entry",
+    [{"id": "vha_656GA"}, None, {"id": "vha_656GA", "distance": "far"}, {"distance": 1.0}],
+    ids=["missing-distance", "null-entry", "string-distance", "missing-id"],
+)
+async def test_malformed_distance_entry_only_blanks_that_distance(bad_entry, caplog):
+    meta = {"distances": [{"id": "vha_437GE", "distance": 2.54}, bad_entry]}
+    body = {"data": BEMIDJI_RESPONSE["data"], "meta": meta}
+
+    with caplog.at_level(logging.WARNING, logger="va_resources_mcp.va_facilities"):
+        results = await search(client_returning(200, body))
+
+    assert [(f.id, f.distance_miles) for f in results] == [
+        ("vha_437GE", 2.54),
+        ("vha_656GA", None),
+    ]
+    assert len(caplog.records) == 1
+
+
+@pytest.mark.parametrize(
+    "bad_key",
+    [
+        "s3cret-tokén",
+        "s3cret-token\n",
+        "s3cret-token\r",
+        " s3cret-token",
+        "s3cret-token ",
+        "s3cret\x00",
+    ],
+    ids=["non-ascii", "trailing-newline", "trailing-cr", "leading-space", "trailing-space", "nul"],
+)
+async def test_unsendable_api_key_raises_error_pointing_at_the_key_without_sending(bad_key):
     requests: list[httpx.Request] = []
-    bad_key = "kéy"
 
     with pytest.raises(FacilitiesError, match="VA_API_KEY") as excinfo:
         await find_facilities(
             *BEMIDJI, api_key=bad_key, client=client_returning(200, {}, requests=requests)
         )
 
-    assert bad_key not in str(excinfo.value)
+    assert "s3cret" not in str(excinfo.value)
     assert requests == []
 
 

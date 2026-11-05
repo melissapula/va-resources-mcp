@@ -4,9 +4,12 @@ Docs: https://developer.va.gov/explore/api/va-facilities/docs
 The API key goes in the `apikey` request header.
 """
 
+import logging
 from dataclasses import dataclass
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 FACILITIES_URL = "https://sandbox-api.va.gov/services/va_facilities/v1/facilities"
 TIMEOUT_SECONDS = 10.0
@@ -49,11 +52,13 @@ async def find_facilities(
     Returns an empty list when nothing matches, so callers can tell "nothing nearby"
     apart from "the service is down" (which raises).
     """
-    # httpx can only encode ASCII header values; anything else would surface as a misleading
-    # "could not be reached" error instead of pointing at the key.
-    if not api_key.isascii():
+    # httpx only accepts ASCII header values, and h11 also rejects control characters and
+    # leading or trailing whitespace (a key pasted with a trailing newline). Any of these would
+    # surface as a misleading "could not be reached" error instead of pointing at the key.
+    if not (api_key.isascii() and api_key.isprintable() and api_key == api_key.strip()):
         raise FacilitiesError(
-            "The VA API key contains characters that aren't allowed. Check VA_API_KEY in .env."
+            "The VA API key contains spaces or characters that aren't allowed. "
+            "Check VA_API_KEY in .env."
         )
 
     params: dict[str, str | int | float] = {"lat": latitude, "long": longitude, "per_page": limit}
@@ -121,9 +126,7 @@ def _error_detail(response: httpx.Response) -> str | None:
 
 
 def _parse_facilities(body: dict) -> list[FacilitySummary]:
-    # Distances aren't inside each facility; the API lists them in meta, keyed by ID.
-    meta = body.get("meta") or {}
-    distances = {d["id"]: d["distance"] for d in meta.get("distances") or []}
+    distances = _distances_by_id(body.get("meta"))
     items = body["data"]
     summaries = [s for s in (_try_summary(item, distances) for item in items) if s is not None]
     # Every record failing means the response shape changed, not that nothing is nearby.
@@ -132,11 +135,35 @@ def _parse_facilities(body: dict) -> list[FacilitySummary]:
     return summaries
 
 
+def _distances_by_id(meta: object) -> dict[str, float]:
+    """Distances aren't inside each facility; the API lists them in meta, keyed by ID.
+
+    A malformed entry is skipped, so that facility just has no distance instead of the whole
+    search failing.
+    """
+    entries = meta.get("distances") if isinstance(meta, dict) else None
+    distances: dict[str, float] = {}
+    for entry in entries if isinstance(entries, list) else []:
+        entry_id, distance = (
+            (entry.get("id"), entry.get("distance")) if isinstance(entry, dict) else (None, None)
+        )
+        # bool is a subclass of int, so exclude it explicitly.
+        is_number = isinstance(distance, (int, float)) and not isinstance(distance, bool)
+        if isinstance(entry_id, str) and is_number:
+            distances[entry_id] = float(distance)
+        else:
+            logger.warning("Ignoring malformed VA facility distance entry: %r", entry)
+    return distances
+
+
 def _try_summary(item: dict, distances: dict[str, float]) -> FacilitySummary | None:
     """Summarize one record, or None if it's malformed, so one bad record doesn't hide the rest."""
     try:
         return _to_summary(item, distances.get(item["id"]))
-    except (KeyError, TypeError, AttributeError):
+    except (KeyError, TypeError, AttributeError) as exc:
+        # Logged so a partial result can be traced; the record holds no request data or key.
+        record_id = item.get("id") if isinstance(item, dict) else None
+        logger.warning("Skipping malformed VA facility record %r: %r", record_id, exc)
         return None
 
 
