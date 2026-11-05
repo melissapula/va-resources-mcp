@@ -121,12 +121,30 @@ async def test_longitude_out_of_range_is_rejected_before_calling_api(fake_find, 
     assert fake.calls == []
 
 
-@pytest.mark.parametrize("radius_miles", [0, -5], ids=["zero", "negative"])
-async def test_radius_that_is_not_positive_is_rejected(fake_find, radius_miles):
+@pytest.mark.parametrize(
+    "radius_miles",
+    [0, -5, float("inf"), float("nan")],
+    ids=["zero", "negative", "infinite", "nan"],
+)
+async def test_radius_that_is_not_a_positive_finite_number_is_rejected(fake_find, radius_miles):
     fake = fake_find(result=[BEMIDJI_CLINIC])
 
     with pytest.raises(ToolError):
         await call_find(**BEMIDJI, radius_miles=radius_miles)
+    assert fake.calls == []
+
+
+async def test_missing_key_becomes_tool_error_without_calling_api(fake_find, monkeypatch):
+    fake = fake_find(result=[BEMIDJI_CLINIC])
+
+    def missing_key() -> str:
+        raise server.ConfigError("VA_API_KEY is not set. Copy .env.example to .env.")
+
+    # Patched rather than unsetting the variable, so the developer's real .env isn't read.
+    monkeypatch.setattr(server, "load_api_key", missing_key)
+
+    with pytest.raises(ToolError, match="VA_API_KEY is not set"):
+        await call_find(**BEMIDJI)
     assert fake.calls == []
 
 

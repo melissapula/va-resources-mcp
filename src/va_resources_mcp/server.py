@@ -1,6 +1,5 @@
 """The MCP server: exposes tools an AI agent can call."""
 
-import os
 import sys
 from typing import Annotated, Literal
 
@@ -9,7 +8,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import Field
 
 from .census import GeocodeError, geocode
-from .config import API_KEY_VAR, ConfigError, load_api_key
+from .config import ConfigError, load_api_key
 from .va_facilities import FacilitiesError, FacilitySummary, find_facilities
 
 mcp = MCPServer(
@@ -54,7 +53,7 @@ async def find_va_facilities(
     longitude: Annotated[float, Field(ge=-180, le=180)],
     facility_type: Literal["health", "benefits", "cemetery", "vet_center"] | None = None,
     service: str | None = None,
-    radius_miles: Annotated[float, Field(gt=0)] | None = None,
+    radius_miles: Annotated[float, Field(gt=0, allow_inf_nan=False)] | None = None,
     limit: Annotated[int, Field(ge=1, le=MAX_FACILITY_LIMIT)] = DEFAULT_FACILITY_LIMIT,
 ) -> str:
     """Find VA facilities near a latitude and longitude, nearest first.
@@ -75,10 +74,14 @@ async def find_va_facilities(
     Distances are in miles. Each result includes the facility ID.
     """
     try:
+        api_key = load_api_key()
+    except ConfigError as exc:
+        raise ToolError(str(exc)) from exc
+    try:
         facilities = await find_facilities(
             latitude,
             longitude,
-            api_key=os.environ[API_KEY_VAR],
+            api_key=api_key,
             facility_type=facility_type,
             service=service,
             radius_miles=radius_miles,
