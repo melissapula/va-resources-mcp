@@ -198,6 +198,29 @@ async def test_malformed_body_raises_facilities_error(client_kwargs):
         await search(client_returning(200, **client_kwargs))
 
 
+async def test_skips_a_malformed_facility_and_returns_the_rest():
+    broken = facility("vha_bad", "Broken Clinic")
+    del broken["attributes"]["operatingStatus"]
+    body = {"data": [broken, *BEMIDJI_RESPONSE["data"]], "meta": BEMIDJI_RESPONSE["meta"]}
+
+    results = await search(client_returning(200, body))
+
+    assert [f.id for f in results] == ["vha_437GE", "vha_656GA"]
+
+
+async def test_non_ascii_api_key_raises_error_pointing_at_the_key_without_sending():
+    requests: list[httpx.Request] = []
+    bad_key = "kéy"
+
+    with pytest.raises(FacilitiesError, match="VA_API_KEY") as excinfo:
+        await find_facilities(
+            *BEMIDJI, api_key=bad_key, client=client_returning(200, {}, requests=requests)
+        )
+
+    assert bad_key not in str(excinfo.value)
+    assert requests == []
+
+
 async def test_json_that_is_not_an_object_raises_facilities_error():
     with pytest.raises(FacilitiesError, match="unexpected response"):
         await search(client_returning(200, ["not", "an", "object"]))

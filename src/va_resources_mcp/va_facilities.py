@@ -49,6 +49,13 @@ async def find_facilities(
     Returns an empty list when nothing matches, so callers can tell "nothing nearby"
     apart from "the service is down" (which raises).
     """
+    # httpx can only encode ASCII header values; anything else would surface as a misleading
+    # "could not be reached" error instead of pointing at the key.
+    if not api_key.isascii():
+        raise FacilitiesError(
+            "The VA API key contains characters that aren't allowed. Check VA_API_KEY in .env."
+        )
+
     params: dict[str, str | int | float] = {"lat": latitude, "long": longitude, "per_page": limit}
     if facility_type:
         params["type"] = facility_type
@@ -117,7 +124,20 @@ def _parse_facilities(body: dict) -> list[FacilitySummary]:
     # Distances aren't inside each facility; the API lists them in meta, keyed by ID.
     meta = body.get("meta") or {}
     distances = {d["id"]: d["distance"] for d in meta.get("distances") or []}
-    return [_to_summary(item, distances.get(item["id"])) for item in body["data"]]
+    items = body["data"]
+    summaries = [s for s in (_try_summary(item, distances) for item in items) if s is not None]
+    # Every record failing means the response shape changed, not that nothing is nearby.
+    if items and not summaries:
+        raise FacilitiesError("The VA Facilities API sent an unexpected response.")
+    return summaries
+
+
+def _try_summary(item: dict, distances: dict[str, float]) -> FacilitySummary | None:
+    """Summarize one record, or None if it's malformed, so one bad record doesn't hide the rest."""
+    try:
+        return _to_summary(item, distances.get(item["id"]))
+    except (KeyError, TypeError, AttributeError):
+        return None
 
 
 def _to_summary(item: dict, distance: float | None) -> FacilitySummary:
