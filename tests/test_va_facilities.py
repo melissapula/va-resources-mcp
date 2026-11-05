@@ -1,9 +1,11 @@
 """Unit tests for the VA Facilities client, using a fake transport instead of the network."""
 
+from contextlib import suppress
+
 import httpx
 import pytest
 
-from va_resources_mcp.va_facilities import FacilitiesError, find_facilities
+from va_resources_mcp.va_facilities import TIMEOUT_SECONDS, FacilitiesError, find_facilities
 
 API_KEY = "test-key-should-never-leak"
 BEMIDJI = (47.47, -94.88)
@@ -199,3 +201,40 @@ async def test_malformed_body_raises_facilities_error(client_kwargs):
 async def test_json_that_is_not_an_object_raises_facilities_error():
     with pytest.raises(FacilitiesError, match="unexpected response"):
         await search(client_returning(200, ["not", "an", "object"]))
+
+
+@pytest.mark.parametrize(
+    ("status", "body"), [(200, BEMIDJI_RESPONSE), (503, {})], ids=["success", "error"]
+)
+async def test_closes_the_client_it_creates_on_success_and_error(monkeypatch, status, body):
+    real_async_client = httpx.AsyncClient
+    created: list[httpx.AsyncClient] = []
+
+    def make_client(**kwargs) -> httpx.AsyncClient:
+        assert kwargs == {"timeout": TIMEOUT_SECONDS}
+        transport = httpx.MockTransport(lambda request: httpx.Response(status, json=body))
+        created.append(real_async_client(transport=transport, **kwargs))
+        return created[-1]
+
+    monkeypatch.setattr(httpx, "AsyncClient", make_client)
+
+    with suppress(FacilitiesError):  # the 503 case raises; this test is about cleanup
+        await find_facilities(*BEMIDJI, api_key=API_KEY)
+
+    (client,) = created
+    assert client.is_closed
+
+
+async def test_does_not_send_the_key_on_a_redirect_even_if_the_client_follows_them():
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(302, headers={"Location": "https://elsewhere.example/collect"})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=True)
+
+    with pytest.raises(FacilitiesError, match="HTTP 302"):
+        await search(client)
+
+    assert [r.url.host for r in requests] == ["sandbox-api.va.gov"]

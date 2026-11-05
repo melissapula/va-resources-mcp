@@ -60,8 +60,13 @@ async def find_facilities(
     owns_client = client is None
     client = client or httpx.AsyncClient(timeout=TIMEOUT_SECONDS)
     try:
+        # Never follow redirects, even on a caller's client: httpx strips only `Authorization`
+        # on a cross-host redirect, so the `apikey` header would go to the new host.
         response = await client.get(
-            FACILITIES_URL, params=params, headers={API_KEY_HEADER: api_key}
+            FACILITIES_URL,
+            params=params,
+            headers={API_KEY_HEADER: api_key},
+            follow_redirects=False,
         )
         response.raise_for_status()
         body = response.json()
