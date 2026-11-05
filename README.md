@@ -40,10 +40,10 @@ npx @modelcontextprotocol/inspector uv run va-resources-mcp
 
 ## Connect it to Claude Code
 
-From this folder:
+Replace `<path-to-repo>` with the full path to your clone of this repository:
 
 ```
-claude mcp add va-resources -- uv --directory C:\Users\missa\repositories\va-resources-mcp run va-resources-mcp
+claude mcp add va-resources -- uv --directory <path-to-repo> run va-resources-mcp
 ```
 
 Then ask Claude: "Geocode 403 4th St NW, Bemidji, MN 56601."
