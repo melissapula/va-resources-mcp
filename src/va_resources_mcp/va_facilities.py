@@ -9,6 +9,8 @@ from dataclasses import dataclass
 
 import httpx
 
+from .config import is_sendable_api_key
+
 logger = logging.getLogger(__name__)
 
 FACILITIES_URL = "https://sandbox-api.va.gov/services/va_facilities/v1/facilities"
@@ -52,10 +54,9 @@ async def find_facilities(
     Returns an empty list when nothing matches, so callers can tell "nothing nearby"
     apart from "the service is down" (which raises).
     """
-    # httpx only accepts ASCII header values, and h11 also rejects control characters and
-    # leading or trailing whitespace (a key pasted with a trailing newline). Any of these would
-    # surface as a misleading "could not be reached" error instead of pointing at the key.
-    if not (api_key.isascii() and api_key.isprintable() and api_key == api_key.strip()):
+    # An unsendable key would surface as a misleading "could not be reached" error instead of
+    # pointing at the key. load_api_key checks this at startup too; this covers other callers.
+    if not is_sendable_api_key(api_key):
         raise FacilitiesError(
             "The VA API key contains spaces or characters that aren't allowed. "
             "Check VA_API_KEY in .env."
